@@ -1,0 +1,98 @@
+[CmdletBinding()]
+param(
+    # can be single email address or array (for creating SAN certificate). example @("www.domain1.com", "www.domain2.com"). NOTE: should be comma-separated
+    [string[]]$Domains = "alpha.jobinjosem.com",
+    [string]$EmailAddress = "jobinjosem@hotmail.com",
+    
+    # This directory is used to store your account key and service directory urls as well as orders and related data
+    [string]$AcmeStateDir = "c:\projects\temp\AcmeState",
+
+    # pfx certificate to generate
+    [string]$OutPfxFilePath = "c:\projects\temp\certificate.pfx",
+    [string]$PfxPassword = "Starcity12@"
+)
+
+# ServiceName (valid names are LetsEncrypt and LetsEncrypt-Staging, use the latter one for testing your scripts).
+$acmeServiceName = "LetsEncrypt";
+
+# Your email addresses, where acme services will send informations.
+$contactMailAddresses = @($EmailAddress);
+
+Import-Module "ACME-PS";
+
+# Check whether ACME state already exists to skip account creation
+if (-not (Test-Path -Path $AcmeStateDir) -or (Get-ChildItem -Path $AcmeStateDir).Count -le 0) {
+    # Create the state object - will be saved to disk
+    New-ACMEState -Path $AcmeStateDir;
+
+    # Load URLs from service directory
+    Get-ACMEServiceDirectory -State $AcmeStateDir -ServiceName $acmeServiceName;
+
+    # Retrieve the first anti-replay nonce
+    New-ACMENonce -State $AcmeStateDir;
+
+    # Create an account key and store it to the state
+    New-ACMEAccountKey -State $AcmeStateDir;
+
+    # Register account key with acme service
+    New-ACMEAccount -State $AcmeStateDir -EmailAddresses $contactMailAddresses -AcceptTOS;
+}
+
+#$state = Get-ACMEState -Path $AcmeStateDir
+
+$dnsIdentifiers = $Domains | ForEach-Object { New-ACMEIdentifier $_ };
+
+# Create a new order
+$order = New-ACMEOrder -State $AcmeStateDir -Identifiers $dnsIdentifiers;
+
+# Fetch the authorizations for that order
+$authorizations = @(Get-ACMEAuthorization -State $AcmeStateDir -Order $order);
+
+foreach($authz in $authorizations) {
+    # Select a challenge to fullfill
+    $challenge = Get-ACMEChallenge -State $AcmeStateDir -Authorization $authZ -Type "http-01";
+
+    # Inspect the challenge data (uncomment, if you want to see the object)
+    # Depending on the challenge-type this will include different properties
+    # $challenge.Data;
+
+    Write-Host "Performing ACME challenge for domain '$($challenge.Identifier.Value)'"
+    Write-Host "################################################"
+    Write-Host "Before continuing perform following steps:"
+    Write-Host "Create file that will be available per following URL: 'http://$($challenge.Data.AbsoluteUrl)'"
+    Write-Host "That file shoudl contain following string: "
+    Write-Host $challenge.Data.Content
+    Write-Host "################################################"
+    Write-Host "Press ENTER when ready..." -NoNewLine
+
+    # Waiting for ENTER
+    Read-Host
+
+    # Signal the ACME server that the challenge is ready
+    $challenge | Complete-ACMEChallenge -State $AcmeStateDir;    
+}
+
+# Wait a little bit and update the order, until we see the status 'ready' or 'invalid'
+while($order.Status -notin ("ready","invalid")) {
+    Start-Sleep -Seconds 10;
+    $order | Update-ACMEOrder -State $AcmeStateDir -PassThru;
+}
+
+# Should the order get invalid, use Get-ACMEAuthorizationError to list error details.
+if($order.Status -ieq ("invalid")) {
+    $order | Get-ACMEAuthorizationError -State $AcmeStateDir;
+    throw "Order was invalid";
+}
+
+# Complete the order - this will issue a certificate singing request
+Complete-ACMEOrder -State $AcmeStateDir -Order $order -GenerateCertificateKey;
+
+# Now we wait until the ACME service provides the certificate url
+while(-not $order.CertificateUrl) {
+    Start-Sleep -Seconds 15
+    $order | Update-Order -State $AcmeStateDir -PassThru
+}
+
+# As soon as the url shows up we can create the PFX
+$password = ConvertTo-SecureString -AsPlainText -Force -String $PfxPassword
+Export-ACMECertificate -State $AcmeStateDir -Order $order -Password $password -Path $OutPfxFilePath;
