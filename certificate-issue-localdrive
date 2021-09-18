@@ -1,15 +1,15 @@
 [CmdletBinding()]
 param(
     # can be single email address or array (for creating SAN certificate). example @("www.domain1.com", "www.domain2.com"). NOTE: should be comma-separated
-    [string[]]$Domains = "alpha.jobinjosem.com",
-    [string]$EmailAddress = "jobinjosem@hotmail.com",
+    [string[]]$Domains = "domain name here",
+    [string]$EmailAddress = "email address here",
     
     # This directory is used to store your account key and service directory urls as well as orders and related data
     [string]$AcmeStateDir = "c:\projects\temp\AcmeState",
 
     # pfx certificate to generate
     [string]$OutPfxFilePath = "c:\projects\temp\certificate.pfx",
-    [string]$PfxPassword = "Starcity12@"
+    [string]$PfxPassword = "Password here"
 )
 
 # ServiceName (valid names are LetsEncrypt and LetsEncrypt-Staging, use the latter one for testing your scripts).
